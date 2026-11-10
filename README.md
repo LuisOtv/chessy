@@ -2,7 +2,7 @@
 
 **Game review with a coach, in your browser.** Type your Chess.com or Lichess username and Chessy loads your latest game, analyzes every move with Stockfish and walks you through it, Chess.com style.
 
-**Live:** luisotv.github.io/chessy/
+**Live:** https://luisotv.github.io/chessy/
 
 ![Chessy](og-image.png)
 
