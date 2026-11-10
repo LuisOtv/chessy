@@ -11,6 +11,7 @@ const PIECE_SETS = {
   flat:             { label: "Silhouette" },
 };
 const BOARD_THEMES = {
+  cheese:   { label: "Cheese",       light: "#fff3cf", dark: "#e7b443" },
   chesscom: { label: "Green",        light: "#eeeed2", dark: "#769656" },
   lime:     { label: "Lime",         light: "#fff2d4", dark: "#8cc936" },
   brown:    { label: "Brown",        light: "#f0d9b5", dark: "#b58863" },
@@ -21,10 +22,10 @@ const BOARD_THEMES = {
 // Motor com os mesmos padrões do Chess.com: revisão "Fast" (~1 s por lance), análise até 5 s com 3 linhas
 const REVIEW_TIMES = { 1000: "Fast (~1 sec)", 3000: "Standard (~3 sec)" };
 const ANALYSIS_TIMES = { 1000: "1 sec", 3000: "3 sec", 5000: "5 sec", 10000: "10 sec" };
-const Settings = { pieces: "modern-outline", board: "chesscom", tts: "kokoro", coachVoice: "bm_fable", reviewTime: 1000, analysisTime: 5000, lines: 3, sfx: "on" };
+const Settings = { pieces: "modern-outline", board: "cheese", tts: "kokoro", coachVoice: "bm_fable", reviewTime: 1000, analysisTime: 5000, lines: 3, sfx: "on" };
 try { Object.assign(Settings, JSON.parse(localStorage.getItem("chessy.settings") || "{}")); } catch (_) { /* sem storage */ }
 if (!PIECE_SETS[Settings.pieces]) Settings.pieces = "modern-outline";
-if (!BOARD_THEMES[Settings.board]) Settings.board = "chesscom";
+if (!BOARD_THEMES[Settings.board]) Settings.board = "cheese";
 // Vozes do Kokoro, das mais suaves para as mais brilhantes
 const KOKORO_VOICES = {
   bm_fable: "Fable · UK ♂", bm_george: "George · UK ♂", am_michael: "Michael · US ♂", am_fenrir: "Fenrir · US ♂",
@@ -493,10 +494,10 @@ function renderGraph() {
   const xs = (i) => (n <= 1 ? 0 : (i / (n - 1)) * W);
   const pts = [];
   for (let i = 0; i < n; i++) { const e = S.evals[i]; if (!e) break; pts.push([xs(i), H * (1 - winPct(cpOf(e)) / 100)]); }
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#3b3935"/>`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#3b2f21"/>`;
   if (pts.length > 1) svg += `<polygon points="0,${H} ${pts.map((p) => p.join(",")).join(" ")} ${pts[pts.length - 1][0]},${H}" fill="#f5f5f5"/>`;
   svg += `<line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="#888" stroke-width=".8" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`;
-  if (S.phase === "review") svg += `<line x1="${xs(S.cur)}" x2="${xs(S.cur)}" y1="0" y2="${H}" stroke="#81b64c" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  if (S.phase === "review") svg += `<line x1="${xs(S.cur)}" x2="${xs(S.cur)}" y1="0" y2="${H}" stroke="#f5b82e" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
   svg += "</svg>";
   let dots = "";
   if (S.analysisDone) {
@@ -787,8 +788,6 @@ function coachMessage(at = S.cur) {
 function updateCoach(mode = "say") { // "say" = texto + voz, "silent" = só texto, "none" = só controles
   const m = coachMessage();
   const q = S.phase === "review" && S.cur > 0 ? quality(S.cur) : null;
-  const bc = m.badge && CLASSES[m.badge].color;
-  el.avatar.style.setProperty("--mood", bc || "#81b64c");
   el.badge.innerHTML = m.badge ? icon(m.badge) : "";
   el.bestLine.innerHTML = m.best ? `${T().bestLabel} <a class="mvlink" data-uci="${esc(m.best.uci)}" title="Play this move on the board">${esc(m.best.san)}</a>` : "";
   el.chip.textContent = m.chip || "";
