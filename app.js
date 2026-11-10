@@ -386,52 +386,34 @@ function soundFor(m, fenAfter) {
   return "move";
 }
 
-/* ====== Efeitos sonoros (sintetizados com Web Audio, sem arquivos) ====== */
+/* ====== Efeitos sonoros ====== */
+const SOUND_FILES = ["move", "capture", "promote"];
 const Sfx = {
-  ctx: null, noise: null,
+  ctx: null, buffers: {}, loading: null,
   ac() {
     if (!this.ctx) this.ctx = new AudioContext();
     if (this.ctx.state === "suspended") this.ctx.resume();
+    if (!this.loading) {
+      this.loading = Promise.all(SOUND_FILES.map((n) => fetch(`sounds/${n}.mp3`).then((r) => r.arrayBuffer())
+        .then((b) => this.ctx.decodeAudioData(b)).then((buf) => { this.buffers[n] = buf; }).catch(() => {})));
+    }
     return this.ctx;
   },
-  // "toc" de peça de madeira: estalo filtrado + corpo grave que cai de tom
-  click(t, pitch = 1, gain = 0.5) {
-    const c = this.ctx;
-    if (!this.noise) {
-      const len = Math.floor(c.sampleRate * 0.08), b = c.createBuffer(1, len, c.sampleRate), d = b.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-      this.noise = b;
-    }
-    const out = c.createGain(); out.gain.value = gain; out.connect(c.destination);
-    const n = c.createBufferSource(); n.buffer = this.noise;
-    const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2200 * pitch; bp.Q.value = 1.4;
-    const ng = c.createGain(); ng.gain.setValueAtTime(0.9, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    n.connect(bp).connect(ng).connect(out); n.start(t); n.stop(t + 0.08);
-    const o = c.createOscillator(); o.type = "sine";
-    o.frequency.setValueAtTime(260 * pitch, t); o.frequency.exponentialRampToValueAtTime(140 * pitch, t + 0.06);
-    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t);
-    og.gain.exponentialRampToValueAtTime(0.8, t + 0.003); og.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-    o.connect(og).connect(out); o.start(t); o.stop(t + 0.1);
-  },
-  tone(t, freqs, dur, gain) {
-    const c = this.ctx;
-    for (const f of freqs) {
-      const o = c.createOscillator(); o.type = "sine"; o.frequency.value = f;
-      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(gain, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
-    }
+  hit(name, t, gain = 1) {
+    const buf = this.buffers[name];
+    if (!buf) return;
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const g = this.ctx.createGain(); g.gain.value = gain;
+    src.connect(g).connect(this.ctx.destination); src.start(t);
   },
   play(kind) {
     if (Settings.sfx !== "on") return;
-    const t = this.ac().currentTime + 0.01;
+    const t = this.ac().currentTime + 0.005;
     switch (kind) {
-      case "capture": this.click(t, 1.25, 0.7); this.click(t + 0.04, 0.85, 0.45); break;
-      case "castle": this.click(t, 1, 0.5); this.click(t + 0.1, 1.08, 0.5); break;
-      case "check": this.click(t, 1, 0.55); this.tone(t + 0.02, [988, 1480], 0.35, 0.06); break;
-      case "promote": this.click(t, 1, 0.55); this.tone(t + 0.03, [660], 0.12, 0.06); this.tone(t + 0.13, [990], 0.25, 0.06); break;
-      case "mate": this.click(t, 1, 0.6); this.tone(t + 0.05, [523, 659, 784], 0.9, 0.05); break;
-      default: this.click(t, 1, 0.55);
+      case "capture": case "mate": this.hit("capture", t); break;
+      case "promote": this.hit("promote", t); break;
+      case "castle": this.hit("move", t); this.hit("move", t + 0.1, 0.8); break;
+      default: this.hit("move", t); // lance e xeque
     }
   },
 };
@@ -1023,7 +1005,7 @@ for (const g of [el.graphS, el.graphR]) g.addEventListener("click", (e) => {
   if (S.phase !== "review") { S.phase = "review"; setPhase("review"); }
   goto(i);
 });
-el.btnStart.onclick = () => setPhase("review");
+el.btnStart.onclick = () => { Sfx.ac(); setPhase("review"); };
 $("btnBack").onclick = () => setPhase("summary");
 $("btnFirst").onclick = () => { stopPlay(); goto(0); };
 $("btnPrev").onclick = () => { stopPlay(); goto(S.cur - 1); };
