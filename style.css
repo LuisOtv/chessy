@@ -82,7 +82,7 @@ button.primary{background:var(--green);color:#10200a;font-weight:700}
 @keyframes talk{from{transform:scale(1,1)}to{transform:scale(1.06,.8)}}
 @media (prefers-reduced-motion:reduce){.avatar *{animation:none!important}}
 /* altura FIXA: o texto nunca empurra o resto da interface */
-.bubble{position:relative;flex:1;min-width:0;height:96px;background:#fff;color:#262522;border-radius:8px;padding:12px 12px;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.bubble{position:relative;flex:1;min-width:0;height:132px;background:#fff;color:#262522;border-radius:8px;padding:12px 12px;display:flex;flex-direction:column;gap:6px;overflow:hidden}
 .bubble::before{content:"";position:absolute;left:-7px;bottom:22px;border:7px solid transparent;border-right-color:#fff;border-left:0}
 .bubbleRow{display:flex;align-items:flex-start;gap:8px}
 .moveBadge{display:flex;align-items:center;flex:0 0 auto}
@@ -91,9 +91,9 @@ button.primary{background:var(--green);color:#10200a;font-weight:700}
 .evalChip{flex:0 0 auto;background:#e9e8e6;border-radius:4px;padding:3px 8px;font-weight:700;font-size:13px}
 .evalChip:empty{display:none}
 .voiceSel{background:var(--card);color:var(--text);border:1px solid #4a4743;border-radius:6px;padding:4px 6px;font-size:12px;max-width:120px}
-.bubbleText{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.35;padding-top:2px}
-.bestLine{font-size:13.5px;color:#5b5955;font-weight:600;padding-left:32px}
-.bestLine:empty{display:none}
+.bubbleRow:has(.bubbleTitle:empty){display:none}
+.bubbleTitle{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.35;padding-top:2px}
+.bubbleText{flex:1;min-height:0;overflow:auto;font-size:14px;line-height:1.42;color:#3d3b38}
 .bubbleText .ghost{visibility:hidden}
 
 .body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:4px 14px 14px}

@@ -84,7 +84,7 @@ const el = {
   form: $("searchForm"), user: $("username"), btn: $("searchBtn"), modal: $("loginModal"), loginErr: $("loginErr"),
   app: $("app"), board: $("board"), arrows: $("arrows"), evalBar: $("evalBar"), evalFill: $("evalFill"), evalNum: $("evalNum"),
   top: $("playerTop"), bottom: $("playerBottom"), panel: document.querySelector(".panel"),
-  coachText: $("coachText"), bestLine: $("bestLine"), lines: $("engineLines"), badge: $("moveBadge"), chip: $("evalChip"), avatar: $("avatar"),
+  coachText: $("coachText"), coachTitle: $("coachTitle"), lines: $("engineLines"), badge: $("moveBadge"), chip: $("evalChip"), avatar: $("avatar"),
   btnShowBest: $("btnShowBest"), btnNextBig: $("btnNextBig"), btnVoice: $("btnVoice"), btnStart: $("btnStart"), btnPlay: $("btnPlay"),
   summary: $("summary"), graphS: $("graphS"), graphR: $("graphR"), moves: $("moves"), status: $("status"),
   vSum: $("viewSummary"), vRev: $("viewReview"),
@@ -281,6 +281,191 @@ function quality(i) { // i = número do lance (1..n)
   return (S.quals[i] = { cls, loss, acc, opening: cls === "book" ? opening : null, bestUci: before.best, bestSan: sanOf(S.fens[i - 1], before.best) });
 }
 
+/* ====== Explicações do coach (estilo Chess.com): o que o lance fez e o que era melhor ====== */
+const PIECE_NAME = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+const uciMove = (u) => ({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] || undefined });
+const ARROW = { green: "#81b64c", red: "#e0533f", blue: "#4fa8e0" };
+
+// Mesma posição com a vez passada ao outro lado (para ver o que uma peça ataca ou ameaça)
+function flipTurn(fen) {
+  const p = fen.split(" ");
+  p[1] = p[1] === "w" ? "b" : "w"; p[3] = "-";
+  const g = new Chess();
+  return g.load(p.join(" ")) ? g : null;
+}
+// Lance que dá mate imediato para o lado da vez (uci) ou null
+function mateInOne(g) {
+  for (const m of g.moves({ verbose: true })) {
+    g.move(m); const mate = g.in_checkmate(); g.undo();
+    if (mate) return m.from + m.to + (m.promotion || "");
+  }
+  return null;
+}
+// Mate em 1 que o lado que NÃO está na vez ameaça
+function mateThreat(fen) {
+  if (new Chess(fen).in_check()) return null;
+  const g = flipTurn(fen);
+  return g ? mateInOne(g) : null;
+}
+// A peça em `sq` pode ser tomada com lucro? (atacada e sem defesa, ou atacada por peça mais barata)
+function isHanging(fen, sq) {
+  const g0 = new Chess(fen), piece = g0.get(sq);
+  if (!piece || piece.type === "k") return false;
+  const g = g0.turn() === piece.color ? flipTurn(fen) : g0;
+  if (!g) return false;
+  const caps = g.moves({ verbose: true }).filter((m) => m.to === sq);
+  if (!caps.length) return false;
+  const cheapest = Math.min(...caps.map((m) => VAL[m.piece]));
+  if (cheapest < VAL[piece.type]) return true;
+  g.move(caps.find((m) => VAL[m.piece] === cheapest));
+  return !g.moves({ verbose: true }).some((m) => m.to === sq); // ninguém retoma
+}
+// Peças inimigas valiosas atacadas pela peça em `sq` (g: posição logo depois do lance dela)
+function forkTargets(g, sq) {
+  const f = flipTurn(g.fen());
+  if (!f) return [];
+  const t = f.moves({ verbose: true }).filter((m) => m.from === sq && m.captured && m.captured !== "k" && (VAL[m.captured] >= 3 || VAL[m.captured] > VAL[m.piece]));
+  return [...new Set(t.map((m) => m.captured))];
+}
+function isFork(g, sq) { return forkTargets(g, sq).length + (g.in_check() ? 1 : 0) >= 2; }
+function material(g, color) {
+  let s = 0;
+  g.board().forEach((r) => r.forEach((p) => { if (p) s += (p.color === color ? 1 : -1) * VAL[p.type]; }));
+  return s;
+}
+// Segue a linha do motor por 4 lances e mede o material que `color` ganha (e a maior peça que tomou)
+function lineGain(fen, pv, color) {
+  const g = new Chess(fen), base = material(g, color);
+  let gain = null, piece = null, fork = false, eventual = false;
+  const n = Math.min(4, pv.length);
+  for (let k = 0; k < n; k++) {
+    const m = g.move(uciMove(pv[k]));
+    if (!m) break;
+    if (m.color === color) {
+      if (m.captured && (!piece || VAL[m.captured] > VAL[piece])) piece = m.captured;
+      if (!fork && isFork(g, m.to)) { fork = true; eventual = k > 1; }
+    } else gain = material(g, color) - base; // mede depois da resposta (posição "calma")
+  }
+  if (gain === null) gain = material(g, color) - base;
+  return { gain, piece: piece && PIECE_NAME[piece], fork, eventual };
+}
+
+// Quem fez o lance, para o texto: você, o adversário ou (na variação) neutro
+const WHO = {
+  you: { S: "You", has: "You have", are: "You are", opp: "your opponent", Poss: "Your" },
+  opp: { S: "Your opponent", has: "Your opponent has", are: "Your opponent is", opp: "you", Poss: "Their" },
+  var: { S: "This side", has: "There is", are: "This", opp: "the opponent", Poss: "The" },
+};
+
+function explainMove(i) {
+  const q = quality(i);
+  if (!q) return null;
+  if (q.why) return q.why;
+  const mv = S.moves[i - 1], fenB = S.fens[i - 1], fenA = S.fens[i];
+  const before = S.evals[i - 1], after = S.evals[i];
+  const color = mv.color, opp = color === "w" ? "b" : "w";
+  const who = S.main && i > S.branchBase ? "var" : color === S.userColor ? "you" : "opp";
+  const W = WHO[who];
+  const B = q.bestSan ? `\u0001${figSan(q.bestSan)}\u0002` : "";
+  const sgn = color === "w" ? 1 : -1;
+  const mateOf = (e) => (e && e.mate !== null && e.mate !== 0 ? (Math.sign(e.mate) === sgn ? "mover" : "opp") : null);
+  const gA = new Chess(fenA);
+  const arrows = [], out = [];
+  const punish = who === "opp" ? ARROW.blue : ARROW.red; // erro seu = vermelho; erro do adversário = chance azul
+
+  if (q.cls === "book") {
+    if (q.opening) out.push(q.opening + ".");
+  } else if (["inaccuracy", "mistake", "miss", "blunder"].includes(q.cls)) {
+    const miss = q.cls === "miss";
+    // 1) o que deu errado: a melhor resposta do adversário
+    const reply = after && after.pv && after.pv[0];
+    let punished = false;
+    if (mateOf(after) === "opp") {
+      out.push(who === "var" ? "This allows a checkmate." : `${W.S} allowed ${W.opp} to checkmate the king.`);
+      punished = true;
+    } else if (reply) {
+      const lg = lineGain(fenA, after.pv, opp);
+      if (lg.gain >= 2 && lg.piece) {
+        out.push(lg.fork ? `This allows ${lg.eventual ? "an eventual" : "a"} fork that wins a ${lg.piece}.` : `This move loses a ${lg.piece}.`);
+        punished = true;
+      }
+    }
+    if (punished && reply) arrows.push({ uci: reply, color: punish });
+    // sem tática clara: diz quem ficou com a vantagem
+    if (!punished && after && (q.cls === "mistake" || q.cls === "blunder")) {
+      const oppWin = 100 - winPct(sgn * cpOf(after));
+      const what = oppWin >= 75 ? "a winning position" : oppWin >= 58 ? "the advantage" : null;
+      const whom = who === "you" ? "your opponent" : who === "opp" ? "you" : "the opponent";
+      if (what) out.push(`This gives ${whom} ${what}.`);
+    }
+    // 2) o que era melhor
+    if (q.bestUci) {
+      arrows.unshift({ uci: q.bestUci, color: ARROW.green });
+      const bm = new Chess(fenB).move(uciMove(q.bestUci));
+      const gB = before && before.pv ? lineGain(fenB, before.pv, color) : { gain: 0 };
+      const chance = miss ? `${W.S} missed a chance to` : who === "var" ? `${B} was the way to` : `${W.S} had an opportunity to`;
+      const withB = miss || who !== "var" ? ` with ${B}` : "";
+      if (mateOf(before) === "mover") {
+        out.push(`${chance} checkmate the king${withB}.`);
+      } else if (bm && bm.captured && gB.gain >= 1 && isHanging(fenB, bm.to)) {
+        out.push(`${chance} capture a free ${PIECE_NAME[bm.captured]}${withB}.`);
+      } else if (gB.gain >= 2 && gB.piece) {
+        out.push(`${chance} win a ${gB.piece}${gB.fork ? (gB.eventual ? " through an eventual fork" : " with a fork") : ""}${withB}.`);
+      } else if (bm && isHanging(fenB, bm.from)) {
+        out.push(`${W.Poss} best move was ${B}, moving the ${PIECE_NAME[bm.piece]} to safety.`);
+      } else if (bm) {
+        const g = new Chess(fenB); g.move(bm);
+        const t = forkTargets(g, bm.to).filter((c) => VAL[c] > VAL[bm.piece] || isHanging(g.fen(), squareOf(g, bm.to, c)));
+        out.push(t.length ? `${W.Poss} better option was ${B}, threatening to capture a ${PIECE_NAME[t.sort((a, b) => VAL[b] - VAL[a])[0]]}.` : `${W.Poss} best move was ${B}.`);
+      }
+    }
+  } else {
+    // lances bons: o que o lance faz
+    if (q.cls === "great") out.push("This is the only good move!");
+    if (q.cls === "brilliant") out.push("A brilliant sacrifice!");
+    const threatBefore = mateThreat(fenB); // o adversário ameaçava mate?
+    const prevMate = threatBefore && !mateInOne(new Chess(fenA));
+    const threatNow = gA.in_checkmate() ? null : mateThreat(fenA);
+    if (mateOf(after) === "mover") {
+      out.push(who === "var" ? `There's a forced checkmate in ${Math.abs(after.mate)}.` : `${W.has} a forced checkmate in ${Math.abs(after.mate)}.`);
+    } else if (prevMate) {
+      out.push(who === "var" ? "This stops a checkmate threat." : `${W.S} prevented ${W.opp} from checkmating the king.`);
+    } else if (mv.captured && isHanging(fenB, mv.to)) {
+      out.push(who === "var" ? `This wins a ${PIECE_NAME[mv.captured]} for free.` : `${W.S} won a ${PIECE_NAME[mv.captured]} for free.`);
+    } else if (isHanging(fenB, mv.from) && !isHanging(fenA, mv.to)) {
+      out.push(who === "var" ? `This moves the ${PIECE_NAME[mv.piece]} out of danger.` : `${W.S} moved the ${PIECE_NAME[mv.piece]} out of danger.`);
+    } else if (threatNow) {
+      out.push(who === "var" ? "This threatens checkmate." : `${W.are} threatening to checkmate the king.`);
+      arrows.push({ uci: threatNow, color: who === "you" ? ARROW.blue : ARROW.red });
+    } else {
+      const fork = forkTargets(gA, mv.to);
+      const prev = S.moves[i - 2];
+      if (fork.length + (gA.in_check() ? 1 : 0) >= 2) {
+        const names = (gA.in_check() ? ["king"] : []).concat(fork.map((c) => PIECE_NAME[c]));
+        out.push(`This forks the ${names.slice(0, -1).join(", ")} and the ${names[names.length - 1]}.`);
+      } else if (mv.flags.includes("k") || mv.flags.includes("q")) out.push("Castles to keep the king safe.");
+      else if (mv.promotion) out.push(`Promotes to a ${PIECE_NAME[mv.promotion]}.`);
+      else if (mv.captured && prev && prev.to === mv.to && prev.captured) out.push(`Recaptures the ${PIECE_NAME[mv.captured]}.`);
+      else if (mv.captured) out.push(`Captures the ${PIECE_NAME[mv.captured]}.`);
+      else if (gA.in_check()) out.push("Puts the king in check.");
+      else if (fork.includes("q") && mv.piece !== "q") out.push("Attacks the queen.");
+      else if ("nb".includes(mv.piece) && mv.from[1] === (color === "w" ? "1" : "8") && i <= 24) out.push(`Develops the ${PIECE_NAME[mv.piece]}${"cdef".includes(mv.to[0]) ? " toward the center" : ""}.`);
+      else if (mv.piece === "p" && ["d4", "e4", "d5", "e5"].includes(mv.to) && i <= 20) out.push("Takes control of the center.");
+    }
+    if (out.length === (q.cls === "great" || q.cls === "brilliant" ? 1 : 0)) {
+      out.push({ best: who === "you" ? "Good job! That's what I would have played too." : "That's the best move here.",
+        excellent: "This is a fine move.", good: "A solid move." }[q.cls] || "");
+    }
+  }
+  return (q.why = { text: out.filter(Boolean).join(" "), arrows });
+}
+// Casa em que está uma peça do tipo `type` atacada a partir de `from` (para checar se está pendurada)
+function squareOf(g, from, type) {
+  const f = flipTurn(g.fen());
+  const m = f && f.moves({ verbose: true }).find((x) => x.from === from && x.captured === type);
+  return m ? m.to : from;
+}
+
 /* ====== Tabuleiro ====== */
 const FILES = "abcdefgh";
 
@@ -338,6 +523,10 @@ function renderBoard() {
   if (S.showBest && q) {
     if (mvPlayed.from + mvPlayed.to !== q.bestUci.slice(0, 4)) drawArrow(mvPlayed.from, mvPlayed.to, "#ca3431", 0.75);
     drawArrow(q.bestUci.slice(0, 2), q.bestUci.slice(2, 4), "#81b64c", 0.92);
+  } else if (q) {
+    // como no Chess.com: verde = melhor lance, vermelho = punição/ameaça contra você, azul = sua chance
+    const why = explainMove(S.cur);
+    if (why) why.arrows.forEach((a) => drawArrow(a.uci.slice(0, 2), a.uci.slice(2, 4), a.color, 0.82));
   }
 }
 
@@ -425,20 +614,26 @@ function center(sq) {
 }
 function drawArrow(from, to, color, op) {
   const [x1, y1] = center(from), [x2, y2] = center(to);
-  const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+  const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+  // lance de cavalo vira seta em "L" (anda primeiro no eixo mais longo)
+  const knight = (dx === 100 && dy === 200) || (dx === 200 && dy === 100);
+  const pts = knight ? [[x1, y1], dy > dx ? [x1, y2] : [x2, y1], [x2, y2]] : [[x1, y1], [x2, y2]];
+  const [px, py] = pts[pts.length - 2];
+  const len = Math.hypot(x2 - px, y2 - py), ux = (x2 - px) / len, uy = (y2 - py) / len;
   const head = 34, hw = 26;
-  const bx = x2 - ux * (head + 6), by = y2 - uy * (head + 6);
-  const tx = x2 - ux * 6, ty = y2 - uy * 6;
-  const sx = x1 + ux * 18, sy = y1 + uy * 18;
+  const bx = x2 - ux * (head + 6), by = y2 - uy * (head + 6), tx = x2 - ux * 6, ty = y2 - uy * 6;
+  const [nx, ny] = pts[1], l0 = Math.hypot(nx - x1, ny - y1);
+  const start = [x1 + ((nx - x1) / l0) * 18, y1 + ((ny - y1) / l0) * 18];
+  const d = [start, ...pts.slice(1, -1), [bx, by]].map((pt, k) => `${k ? "L" : "M"}${pt[0]} ${pt[1]}`).join("");
   const ns = "http://www.w3.org/2000/svg";
   const g = document.createElementNS(ns, "g"); g.setAttribute("opacity", op);
-  const l = document.createElementNS(ns, "line");
-  l.setAttribute("x1", sx); l.setAttribute("y1", sy); l.setAttribute("x2", bx); l.setAttribute("y2", by);
-  l.setAttribute("stroke", color); l.setAttribute("stroke-width", 16); l.setAttribute("stroke-linecap", "round");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", d); path.setAttribute("fill", "none"); path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", 16); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
   const p = document.createElementNS(ns, "polygon");
   p.setAttribute("points", `${tx},${ty} ${bx - uy * hw},${by + ux * hw} ${bx + uy * hw},${by - ux * hw}`);
   p.setAttribute("fill", color);
-  g.append(l, p); el.arrows.appendChild(g);
+  g.append(path, p); el.arrows.appendChild(g);
 }
 
 /* ====== Barra de avaliação, jogadores, relógios ====== */
@@ -596,7 +791,7 @@ const Coach = {
   setTalking() { el.avatar.classList.toggle("talking", this.speaking || this.typing); },
   // O texto completo é renderizado desde o início (parte "ghost" invisível), então o layout nunca se mexe.
   // Trechos entre \u0001 e \u0002 viram lances clicáveis (jogam `uci` no tabuleiro).
-  say(text, voice = true, uci = null) {
+  say(text, voice = true, uci = null, title = "") {
     clearInterval(this.timer);
     stopVoices();
     this.speaking = false; this.typing = true; this.setTalking();
@@ -621,9 +816,9 @@ const Coach = {
     if (!voice || !S.voiceOn) return;
     const talk = (on) => { this.speaking = on; this.setTalking(); };
     if (useKokoro()) {
-      Kokoro.speak(speakable(plain), Settings.coachVoice, () => talk(true), () => talk(false));
+      Kokoro.speak(speakable(speechOf(title, plain)), Settings.coachVoice, () => talk(true), () => talk(false));
     } else if ("speechSynthesis" in window) {
-      const u = new SpeechSynthesisUtterance(speakable(plain));
+      const u = new SpeechSynthesisUtterance(speakable(speechOf(title, plain)));
       u.lang = "en-US"; u.rate = 1;
       const v = Voices.current();
       if (v) { u.voice = v; u.lang = v.lang; }
@@ -758,7 +953,6 @@ const MSG = {
         book: "is a book move", inaccuracy: "is an inaccuracy", mistake: "is a mistake", miss: "is a miss", blunder: "is a blunder" },
   lastBook: "is the last book move",
   mate: "is checkmate",
-  bestLabel: "Best:",
   analyzing: "Analyzing the game…",
   summary: (mine, theirs) => `Accuracy: you ${mine}%, opponent ${theirs}%.`,
   start: "Let's review this game.",
@@ -766,6 +960,8 @@ const MSG = {
   test: "Hi! This is my voice.",
 };
 const T = () => MSG;
+// O que a voz lê: título + explicação, sem as marcações de lance clicável
+const speechOf = (title, text) => [title, (text || "").replace(/[\u0001\u0002]/g, "")].filter(Boolean).join(". ");
 
 function coachMessage(at = S.cur) {
   const L = T(), you = S.userColor;
@@ -777,11 +973,11 @@ function coachMessage(at = S.cur) {
   const i = at, mv = S.moves[i - 1], q = quality(i);
   const san = figSan(mv.san);
   if (!q) return { pending: true, text: L.pending(san) };
-  if (new Chess(S.fens[i]).in_checkmate()) return { badge: q.cls, chip: "#", text: `${san} ${L.mate}` };
+  const why = explainMove(i);
+  if (new Chess(S.fens[i]).in_checkmate()) return { badge: q.cls, chip: "#", title: `${san} ${L.mate}`, text: "" };
   let verb = L.is[q.cls];
   if (q.cls === "book") { const nq = i < S.moves.length ? quality(i + 1) : null; if (nq && nq.cls !== "book") verb = L.lastBook; }
-  const showBest = q.bestSan && !["best", "book", "great", "brilliant"].includes(q.cls);
-  return { badge: q.cls, chip: fmtEval(S.evals[i]), text: `${san} ${verb}`, best: showBest ? { san: figSan(q.bestSan), uci: q.bestUci } : null };
+  return { badge: q.cls, chip: fmtEval(S.evals[i]), title: `${san} ${verb}`, text: why.text, uci: q.bestUci };
 }
 
 function updateCoach(mode = "say") { // "say" = texto + voz, "silent" = só texto, "none" = só controles
@@ -790,7 +986,7 @@ function updateCoach(mode = "say") { // "say" = texto + voz, "silent" = só text
   const bc = m.badge && CLASSES[m.badge].color;
   el.avatar.style.setProperty("--mood", bc || "#81b64c");
   el.badge.innerHTML = m.badge ? icon(m.badge) : "";
-  el.bestLine.innerHTML = m.best ? `${T().bestLabel} <a class="mvlink" data-uci="${esc(m.best.uci)}" title="Play this move on the board">${esc(m.best.san)}</a>` : "";
+  el.coachTitle.textContent = m.title || "";
   el.chip.textContent = m.chip || "";
   el.btnShowBest.disabled = !(q && q.bestUci && !["best", "book", "great", "brilliant"].includes(q.cls));
   el.btnShowBest.textContent = S.showBest ? "Back" : "Best";
@@ -798,14 +994,14 @@ function updateCoach(mode = "say") { // "say" = texto + voz, "silent" = só text
   renderVarBar();
   // cada fala só é dita uma vez por partida
   if (mode === "say" && !m.pending) {
-    const key = S.fens[S.cur] + "|" + m.text;
+    const key = S.fens[S.cur] + "|" + (m.title || "") + m.text;
     if (S.spoken.has(key)) mode = "silent"; else S.spoken.add(key);
   }
-  if (mode !== "none") Coach.say(m.text, mode === "say" && !m.pending);
+  if (mode !== "none") Coach.say(m.text, mode === "say" && !m.pending, m.uci, m.title);
   // já prepara a fala do próximo lance para o "Próximo" responder na hora
   if (mode === "say" && S.voiceOn && useKokoro() && S.phase === "review" && S.cur + 1 < S.fens.length) {
     const n = coachMessage(S.cur + 1);
-    if (!n.pending) Kokoro.prefetch(speakable(n.text), Settings.coachVoice);
+    if (!n.pending) Kokoro.prefetch(speakable(speechOf(n.title, n.text)), Settings.coachVoice);
   }
 }
 
@@ -965,7 +1161,7 @@ function startDrag(from) {
 }
 
 // Clicar no lance sugerido pelo coach: volta uma posição e joga o melhor lance
-el.bestLine.addEventListener("click", (e) => {
+el.coachText.addEventListener("click", (e) => {
   const a = e.target.closest(".mvlink");
   if (!a || !a.dataset.uci || !canPlay() || S.cur < 1) return;
   const uci = a.dataset.uci;
