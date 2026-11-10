@@ -21,7 +21,7 @@ const BOARD_THEMES = {
 // Motor com os mesmos padrões do Chess.com: revisão "Fast" (~1 s por lance), análise até 5 s com 3 linhas
 const REVIEW_TIMES = { 1000: "Fast (~1 sec)", 3000: "Standard (~3 sec)" };
 const ANALYSIS_TIMES = { 1000: "1 sec", 3000: "3 sec", 5000: "5 sec", 10000: "10 sec" };
-const Settings = { pieces: "modern-outline", board: "chesscom", tts: "kokoro", coachVoice: "bm_fable", reviewTime: 1000, analysisTime: 5000, lines: 3 };
+const Settings = { pieces: "modern-outline", board: "chesscom", tts: "kokoro", coachVoice: "bm_fable", reviewTime: 1000, analysisTime: 5000, lines: 3, sfx: "on" };
 try { Object.assign(Settings, JSON.parse(localStorage.getItem("chessy.settings") || "{}")); } catch (_) { /* sem storage */ }
 if (!PIECE_SETS[Settings.pieces]) Settings.pieces = "modern-outline";
 if (!BOARD_THEMES[Settings.board]) Settings.board = "chesscom";
@@ -32,6 +32,7 @@ const KOKORO_VOICES = {
 };
 if (!["kokoro", "browser"].includes(Settings.tts)) Settings.tts = "kokoro";
 if (!KOKORO_VOICES[Settings.coachVoice]) Settings.coachVoice = "bm_fable";
+if (!["on", "off"].includes(Settings.sfx)) Settings.sfx = "on";
 if (!REVIEW_TIMES[Settings.reviewTime]) Settings.reviewTime = 1000;
 if (!ANALYSIS_TIMES[Settings.analysisTime]) Settings.analysisTime = 5000;
 if (![1, 2, 3].includes(Settings.lines)) Settings.lines = 3;
@@ -286,6 +287,18 @@ const FILES = "abcdefgh";
 function renderBoard() {
   const idx = S.showBest ? S.cur - 1 : S.cur;
   const board = new Chess(S.fens[idx]).board();
+  // Descobre se a posição mudou por exatamente um lance (para animar e tocar o som)
+  const fen = S.fens[idx], prevFen = S.shownFen, noAnim = S.noAnim;
+  S.shownFen = fen; S.noAnim = false;
+  let step = null;
+  if (prevFen && prevFen !== fen) {
+    if (idx > 0 && S.fens[idx - 1] === prevFen) step = { m: S.moves[idx - 1], dir: 1 };
+    else if (S.fens[idx + 1] === prevFen) step = { m: S.moves[idx], dir: -1 };
+    else {
+      const fwd = moveBetween(prevFen, fen), back = !fwd && moveBetween(fen, prevFen);
+      if (fwd) step = { m: fwd, dir: 1 }; else if (back) step = { m: back, dir: -1 };
+    }
+  }
   const hl = new Set(), hlBest = new Set();
   let badge = null;
   const mvPlayed = S.cur > 0 ? S.moves[S.cur - 1] : null;
@@ -316,6 +329,10 @@ function renderBoard() {
   }
   el.board.querySelectorAll(".sq").forEach((n) => n.remove());
   el.board.insertBefore(frag, el.arrows);
+  if (step) {
+    if (!noAnim) animateStep(step);
+    Sfx.play(step.dir < 0 ? "move" : soundFor(step.m, fen));
+  }
 
   el.arrows.innerHTML = "";
   if (S.showBest && q) {
@@ -323,6 +340,101 @@ function renderBoard() {
     drawArrow(q.bestUci.slice(0, 2), q.bestUci.slice(2, 4), "#81b64c", 0.92);
   }
 }
+
+// Lance que leva da posição a para a b (ou null)
+function moveBetween(a, b) {
+  const g = new Chess(a), target = fenKey(b);
+  for (const m of g.moves({ verbose: true })) {
+    g.move(m);
+    const ok = fenKey(g.fen()) === target;
+    g.undo();
+    if (ok) return m;
+  }
+  return null;
+}
+
+// A peça desliza da casa de origem até a de destino (no roque, a torre também)
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+function animateStep({ m, dir }) {
+  if (reduceMotion.matches) return;
+  const pairs = [[m.from, m.to]];
+  const r = m.color === "w" ? "1" : "8";
+  if (m.flags.includes("k")) pairs.push(["h" + r, "f" + r]);
+  if (m.flags.includes("q")) pairs.push(["a" + r, "d" + r]);
+  for (const [a, b] of pairs) {
+    const [src, dst] = dir > 0 ? [a, b] : [b, a];
+    const img = el.board.querySelector(`[data-sq="${dst}"] img`);
+    if (!img) continue;
+    const [x1, y1] = center(src), [x2, y2] = center(dst); // 100 unidades = 1 casa = 100% da imagem
+    img.style.translate = `${x1 - x2}% ${y1 - y2}%`;
+    img.style.zIndex = 6;
+    void img.offsetWidth; // aplica a posição de partida antes de ligar a transição
+    img.style.transition = "translate .18s ease-out";
+    img.style.translate = "0 0";
+    const done = () => { img.style.cssText = ""; };
+    img.addEventListener("transitionend", done, { once: true });
+    setTimeout(done, 300); // garantia, caso a aba esteja em segundo plano
+  }
+}
+
+function soundFor(m, fenAfter) {
+  if (new Chess(fenAfter).in_checkmate()) return "mate";
+  if (m.san.includes("+")) return "check";
+  if (/[kq]/.test(m.flags)) return "castle";
+  if (m.promotion) return "promote";
+  if (m.captured) return "capture";
+  return "move";
+}
+
+/* ====== Efeitos sonoros (sintetizados com Web Audio, sem arquivos) ====== */
+const Sfx = {
+  ctx: null, noise: null,
+  ac() {
+    if (!this.ctx) this.ctx = new AudioContext();
+    if (this.ctx.state === "suspended") this.ctx.resume();
+    return this.ctx;
+  },
+  // "toc" de peça de madeira: estalo filtrado + corpo grave que cai de tom
+  click(t, pitch = 1, gain = 0.5) {
+    const c = this.ctx;
+    if (!this.noise) {
+      const len = Math.floor(c.sampleRate * 0.08), b = c.createBuffer(1, len, c.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+      this.noise = b;
+    }
+    const out = c.createGain(); out.gain.value = gain; out.connect(c.destination);
+    const n = c.createBufferSource(); n.buffer = this.noise;
+    const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 2200 * pitch; bp.Q.value = 1.4;
+    const ng = c.createGain(); ng.gain.setValueAtTime(0.9, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    n.connect(bp).connect(ng).connect(out); n.start(t); n.stop(t + 0.08);
+    const o = c.createOscillator(); o.type = "sine";
+    o.frequency.setValueAtTime(260 * pitch, t); o.frequency.exponentialRampToValueAtTime(140 * pitch, t + 0.06);
+    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.8, t + 0.003); og.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.1);
+  },
+  tone(t, freqs, dur, gain) {
+    const c = this.ctx;
+    for (const f of freqs) {
+      const o = c.createOscillator(); o.type = "sine"; o.frequency.value = f;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+    }
+  },
+  play(kind) {
+    if (Settings.sfx !== "on") return;
+    const t = this.ac().currentTime + 0.01;
+    switch (kind) {
+      case "capture": this.click(t, 1.25, 0.7); this.click(t + 0.04, 0.85, 0.45); break;
+      case "castle": this.click(t, 1, 0.5); this.click(t + 0.1, 1.08, 0.5); break;
+      case "check": this.click(t, 1, 0.55); this.tone(t + 0.02, [988, 1480], 0.35, 0.06); break;
+      case "promote": this.click(t, 1, 0.55); this.tone(t + 0.03, [660], 0.12, 0.06); this.tone(t + 0.13, [990], 0.25, 0.06); break;
+      case "mate": this.click(t, 1, 0.6); this.tone(t + 0.05, [523, 659, 784], 0.9, 0.05); break;
+      default: this.click(t, 1, 0.55);
+    }
+  },
+};
 
 function center(sq) {
   const file = FILES.indexOf(sq[0]), rank = +sq[1];
@@ -865,7 +977,7 @@ function startDrag(from) {
     if (!moved) return; // foi só um clique: a peça fica selecionada
     const t = document.elementFromPoint(ev.clientX, ev.clientY);
     const target = t && t.closest(".sq");
-    if (target && target.dataset.sq !== from && targetsFrom(from).includes(target.dataset.sq)) userMove(from, target.dataset.sq);
+    if (target && target.dataset.sq !== from && targetsFrom(from).includes(target.dataset.sq)) { S.noAnim = true; userMove(from, target.dataset.sq); }
   };
   window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
 }
@@ -1053,7 +1165,9 @@ function renderSettings() {
     `<span class="sPrev"><span style="background:${v.light}"></span><span style="background:${v.dark}"></span></span>`, v.label)).join("");
   const seg = (kind, opts) => `<div class="sSeg">${opts.map(([k, label]) => `<button class="sOpt${String(Settings[kind]) === k ? " on" : ""}" data-kind="${kind}" data-key="${k}" aria-pressed="${String(Settings[kind]) === k}"><span>${label}</span></button>`).join("")}</div>`;
   const sel = (id, opts, cur) => `<select id="${id}" class="voiceSel wide">${Object.entries(opts).map(([k, v]) => `<option value="${k}"${String(cur) === k ? " selected" : ""}>${v}</option>`).join("")}</select>`;
-  pop.innerHTML = `<h4>Engine</h4>
+  pop.innerHTML = `<h4>Sound</h4>
+    <div class="sRow"><span>Move sounds</span>${seg("sfx", [["on", "On"], ["off", "Off"]])}</div>
+    <h4>Engine</h4>
     <div class="sRow"><span>Review strength</span>${sel("setReviewTime", REVIEW_TIMES, Settings.reviewTime)}</div>
     <div class="sRow"><span>Analysis time</span>${sel("setAnalysisTime", ANALYSIS_TIMES, Settings.analysisTime)}</div>
     <div class="sRow"><span>Lines</span>${seg("lines", [["1", "1"], ["2", "2"], ["3", "3"]])}</div>
