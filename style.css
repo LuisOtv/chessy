@@ -55,6 +55,9 @@ button.primary{background:var(--green);color:#10200a;font-weight:700}
 .sq .mbadge{position:absolute;top:-6%;right:-6%;z-index:4;width:40%;height:40%;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
 .mbadge svg{width:100%;height:100%;display:block}
 .arrows{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none}
+/* marcas do usuário: casas por baixo das peças, setas por cima de tudo */
+.markSquares{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+.markArrows{z-index:5}
 
 /* ===== painel ===== */
 .panelHead{flex:0 0 52px;display:flex;align-items:center;gap:4px;padding:0 10px;border-bottom:1px solid #1d1c1a}

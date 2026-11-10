@@ -76,13 +76,13 @@ const S = {
   runId: 0, moves: [], fens: [], evals: [], quals: [], clocks: [], initClock: null,
   cur: 0, flipped: false, showBest: false, userColor: "w", headers: {}, avatars: {},
   voiceOn: true, analysisDone: false, phase: "summary", expanded: false, playTimer: null,
-  main: null, branchBase: 0, sel: null, cache: new Map(), spoken: new Set(), // variação: S.main guarda a partida original
+  marks: { arrows: new Map(), squares: new Map() }, main: null, branchBase: 0, sel: null, cache: new Map(), spoken: new Set(), // variação: S.main guarda a partida original
 };
 
 const $ = (id) => document.getElementById(id);
 const el = {
   form: $("searchForm"), user: $("username"), btn: $("searchBtn"), modal: $("loginModal"), loginErr: $("loginErr"),
-  app: $("app"), board: $("board"), arrows: $("arrows"), evalBar: $("evalBar"), evalFill: $("evalFill"), evalNum: $("evalNum"),
+  app: $("app"), board: $("board"), arrows: $("arrows"), markSquares: $("markSquares"), markArrows: $("markArrows"), evalBar: $("evalBar"), evalFill: $("evalFill"), evalNum: $("evalNum"),
   top: $("playerTop"), bottom: $("playerBottom"), panel: document.querySelector(".panel"),
   coachText: $("coachText"), coachTitle: $("coachTitle"), lines: $("engineLines"), badge: $("moveBadge"), chip: $("evalChip"), avatar: $("avatar"),
   btnShowBest: $("btnShowBest"), btnNextBig: $("btnNextBig"), btnVoice: $("btnVoice"), btnStart: $("btnStart"), btnPlay: $("btnPlay"),
@@ -475,6 +475,7 @@ function renderBoard() {
   // Descobre se a posição mudou por exatamente um lance (para animar e tocar o som)
   const fen = S.fens[idx], prevFen = S.shownFen, noAnim = S.noAnim;
   S.shownFen = fen; S.noAnim = false;
+  if (prevFen !== fen) { S.marks.arrows.clear(); S.marks.squares.clear(); }
   let step = null;
   if (prevFen && prevFen !== fen) {
     if (idx > 0 && S.fens[idx - 1] === prevFen) step = { m: S.moves[idx - 1], dir: 1 };
@@ -528,6 +529,7 @@ function renderBoard() {
     const why = explainMove(S.cur);
     if (why) why.arrows.forEach((a) => drawArrow(a.uci.slice(0, 2), a.uci.slice(2, 4), a.color, 0.82));
   }
+  renderMarks();
 }
 
 // Lance que leva da posição a para a b (ou null)
@@ -612,7 +614,7 @@ function center(sq) {
   const fx = S.flipped ? 7 - file : file, fy = S.flipped ? rank - 1 : 8 - rank;
   return [(fx + 0.5) * 100, (fy + 0.5) * 100];
 }
-function drawArrow(from, to, color, op) {
+function drawArrow(from, to, color, op, layer = el.arrows) {
   const [x1, y1] = center(from), [x2, y2] = center(to);
   const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
   // lance de cavalo vira seta em "L" (anda primeiro no eixo mais longo)
@@ -633,7 +635,7 @@ function drawArrow(from, to, color, op) {
   const p = document.createElementNS(ns, "polygon");
   p.setAttribute("points", `${tx},${ty} ${bx - uy * hw},${by + ux * hw} ${bx + uy * hw},${by - ux * hw}`);
   p.setAttribute("fill", color);
-  g.append(path, p); el.arrows.appendChild(g);
+  g.append(path, p); layer.appendChild(g);
 }
 
 /* ====== Barra de avaliação, jogadores, relógios ====== */
@@ -1125,6 +1127,59 @@ function askPromotion(from, to) {
   ov.appendChild(box);
   el.board.appendChild(ov);
 }
+
+/* ====== Desenhar com o botão direito: arrastar = seta, clicar = marcar casa ======
+   Shift = verde, Ctrl = azul, Alt = amarelo; repetir apaga; clique esquerdo limpa tudo. */
+const MARK_COLORS = {
+  arrow: { base: "#f0a32a", shift: "#81b64c", ctrl: "#4fa8e0", alt: "#e8c547" },
+  square: { base: "#e0533f", shift: "#81b64c", ctrl: "#4fa8e0", alt: "#e8c547" },
+};
+const markColor = (kind, e) => MARK_COLORS[kind][e.shiftKey ? "shift" : e.ctrlKey ? "ctrl" : e.altKey ? "alt" : "base"];
+function renderMarks(preview) {
+  const ns = "http://www.w3.org/2000/svg";
+  el.markSquares.innerHTML = "";
+  for (const [sq, color] of S.marks.squares) {
+    const [x, y] = center(sq);
+    const r = document.createElementNS(ns, "rect");
+    r.setAttribute("x", x - 50); r.setAttribute("y", y - 50); r.setAttribute("width", 100); r.setAttribute("height", 100);
+    r.setAttribute("fill", color); r.setAttribute("opacity", 0.7);
+    el.markSquares.appendChild(r);
+  }
+  el.markArrows.innerHTML = "";
+  for (const [key, color] of S.marks.arrows) drawArrow(key.slice(0, 2), key.slice(2, 4), color, 0.85, el.markArrows);
+  if (preview) drawArrow(preview.from, preview.to, preview.color, 0.6, el.markArrows);
+}
+function clearMarks() {
+  if (!S.marks.arrows.size && !S.marks.squares.size) return;
+  S.marks.arrows.clear(); S.marks.squares.clear(); renderMarks();
+}
+const squareAt = (x, y) => { const t = document.elementFromPoint(x, y); const sq = t && t.closest && t.closest(".sq"); return sq ? sq.dataset.sq : null; };
+
+el.board.addEventListener("contextmenu", (e) => e.preventDefault());
+el.board.addEventListener("pointerdown", (e) => {
+  if (e.button === 0) { clearMarks(); return; }
+  if (e.button !== 2 || !S.fens.length) return;
+  const from = squareAt(e.clientX, e.clientY);
+  if (!from) return;
+  e.preventDefault();
+  const move = (ev) => {
+    const to = squareAt(ev.clientX, ev.clientY);
+    renderMarks(to && to !== from ? { from, to, color: markColor("arrow", ev) } : null);
+  };
+  const up = (ev) => {
+    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+    const to = squareAt(ev.clientX, ev.clientY);
+    if (to && to !== from) {
+      const key = from + to, color = markColor("arrow", ev);
+      if (S.marks.arrows.get(key) === color) S.marks.arrows.delete(key); else S.marks.arrows.set(key, color);
+    } else if (to === from) {
+      const color = markColor("square", ev);
+      if (S.marks.squares.get(from) === color) S.marks.squares.delete(from); else S.marks.squares.set(from, color);
+    }
+    renderMarks();
+  };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+});
 
 el.board.addEventListener("pointerdown", (e) => {
   if (!canPlay() || S.showBest || e.button !== 0) return;
