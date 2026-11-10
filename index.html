@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chessy – Game Review</title>
 <meta name="description" content="Review your latest Chess.com or Lichess game with a Stockfish-powered coach, right in your browser.">
-<meta name="theme-color" content="#2a2117">
-<link rel="icon" href="favicon.svg?v=2" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=2" sizes="32x32" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
-<link rel="manifest" href="site.webmanifest?v=2">
+<meta name="theme-color" content="#302e2b">
+<link rel="icon" href="favicon.svg?v=3" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=3" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=3">
+<link rel="manifest" href="site.webmanifest?v=3">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Chessy – Game Review">
 <meta property="og:description" content="Review your latest Chess.com or Lichess game with a Stockfish-powered coach, right in your browser.">
 <meta property="og:url" content="https://eucomoareia.github.io/chessy/">
-<meta property="og:image" content="https://eucomoareia.github.io/chessy/og-image.png?v=2">
+<meta property="og:image" content="https://eucomoareia.github.io/chessy/og-image.png?v=3">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
@@ -33,13 +33,13 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><img class="logo" src="favicon.svg?v=2" alt="" width="28" height="28"> Chessy</div>
+  <div class="brand"><img class="logo" src="favicon.svg?v=3" alt="" width="28" height="28"> Chessy</div>
   <button id="btnNewGame" class="primary hidden">New review</button>
 </header>
 
 <div class="modal" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
   <form id="searchForm" class="loginCard">
-    <img class="loginLogo" src="favicon.svg?v=2" alt="" width="64" height="64">
+    <img class="loginLogo" src="favicon.svg?v=3" alt="" width="64" height="64">
     <h1 id="loginTitle">Review your latest game</h1>
     <div class="seg" role="radiogroup" aria-label="Platform">
       <label><input type="radio" name="platform" value="chesscom" checked><span>Chess.com</span></label>
@@ -80,50 +80,21 @@
       <div class="coach">
         <div class="avatar" id="avatar">
           <svg viewBox="0 0 120 124" aria-hidden="true">
-            <ellipse class="rbShadow" cx="60" cy="120" rx="28" ry="3.5" fill="#000" opacity=".3"/>
+            <ellipse class="rbShadow" cx="60" cy="118" rx="30" ry="4" fill="#000" opacity=".28"/>
             <g class="rbBody">
-              <!-- orelhas: ovais, finas, rosadas por dentro -->
-              <ellipse cx="31" cy="37" rx="17" ry="21" transform="rotate(-28 31 37)" fill="#a39a9f"/>
-              <ellipse cx="89" cy="37" rx="17" ry="21" transform="rotate(28 89 37)" fill="#a39a9f"/>
-              <ellipse cx="32" cy="39" rx="11" ry="15" transform="rotate(-28 32 39)" fill="#e6aab5"/>
-              <ellipse cx="88" cy="39" rx="11" ry="15" transform="rotate(28 88 39)" fill="#e6aab5"/>
-              <path d="M27 31Q33 40 34 50M93 31Q87 40 86 50" fill="none" stroke="#cf8e9c" stroke-width="1.4" stroke-linecap="round"/>
-              <!-- tufos de pelo nas laterais -->
-              <path d="M29 64Q21 66 18 72Q24 71 27 73Q20 78 21 85Q27 80 33 84Z" fill="#7b7e86"/>
-              <path d="M91 64Q99 66 102 72Q96 71 93 73Q100 78 99 85Q93 80 87 84Z" fill="#7b7e86"/>
-              <!-- cabeça afinando num focinho comprido -->
-              <path d="M60 33C83 33 97 49 96 66C95 81 85 93 73 103C68 108 64 112 60 113C56 112 52 108 47 103C35 93 25 81 24 66C23 49 37 33 60 33Z" fill="#8d9097"/>
-              <path d="M60 34C70 34 77 38 81 45C74 45 67 49 60 59C53 49 46 45 39 45C43 38 50 34 60 34Z" fill="#7a7d84"/>
-              <!-- focinho mais claro -->
-              <path d="M60 76C70 76 76 84 75 94C74 102 67 109 60 112C53 109 46 102 45 94C44 84 50 76 60 76Z" fill="#c5c6cb"/>
-              <!-- fios de pelo -->
-              <g fill="none" stroke="#6c6f76" stroke-width="1.2" stroke-linecap="round" opacity=".75">
-                <path d="M52 41Q54 45 53 49M60 38V45M68 41Q66 45 67 49"/>
-                <path d="M31 70Q35 72 37 76M30 78Q34 79 37 83M89 70Q85 72 83 76M90 78Q86 79 83 83"/>
-              </g>
+              <path d="M60 23V13" stroke="#9aa6b2" stroke-width="4" stroke-linecap="round"/>
+              <circle class="rbBulb" cx="60" cy="10" r="5.5"/>
+              <rect x="7" y="50" width="13" height="28" rx="6.5" fill="#aab6c2"/>
+              <rect x="100" y="50" width="13" height="28" rx="6.5" fill="#aab6c2"/>
+              <rect x="16" y="22" width="88" height="82" rx="30" fill="#e4e9ee"/>
+              <rect x="24" y="37" width="72" height="52" rx="21" fill="#20262e"/>
               <g class="rbLook">
                 <g class="eyes">
-                  <ellipse cx="44" cy="64" rx="6.2" ry="7.2" transform="rotate(-12 44 64)" fill="#15161a"/>
-                  <ellipse cx="76" cy="64" rx="6.2" ry="7.2" transform="rotate(12 76 64)" fill="#15161a"/>
-                  <circle cx="46" cy="61.4" r="1.6" fill="#fff" opacity=".7"/>
-                  <circle cx="78" cy="61.4" r="1.6" fill="#fff" opacity=".7"/>
+                  <ellipse class="rbEye" cx="45" cy="63" rx="8" ry="10"/>
+                  <ellipse class="rbEye" cx="75" cy="63" rx="8" ry="10"/>
                 </g>
               </g>
-              <!-- pontinhos dos bigodes -->
-              <g fill="#8d9097"><circle cx="52" cy="96" r=".9"/><circle cx="50" cy="100" r=".9"/><circle cx="68" cy="96" r=".9"/><circle cx="70" cy="100" r=".9"/></g>
-              <g class="msWhiskL" fill="none" stroke="#d9d9dd" stroke-width="1" stroke-linecap="round" opacity=".9">
-                <path d="M51 97Q34 90 12 88"/><path d="M50 100Q32 99 10 102"/><path d="M51 103Q35 108 16 116"/>
-              </g>
-              <g class="msWhiskR" fill="none" stroke="#d9d9dd" stroke-width="1" stroke-linecap="round" opacity=".9">
-                <path d="M69 97Q86 90 108 88"/><path d="M70 100Q88 99 110 102"/><path d="M69 103Q85 108 104 116"/>
-              </g>
-              <!-- dentinhos, nariz e narinas -->
-              <rect x="57.6" y="111" width="2.2" height="4.4" rx=".7" fill="#efe4c8"/>
-              <rect x="60.2" y="111" width="2.2" height="4.4" rx=".7" fill="#efe4c8"/>
-              <g class="msNose">
-                <path d="M60 110C57 108.6 55 106.4 55.6 104.4C56.2 102.6 58.4 102.4 60 103.6C61.6 102.4 63.8 102.6 64.4 104.4C65 106.4 63 108.6 60 110Z" fill="#d9899a"/>
-                <path d="M57.6 105.4Q58.4 106.6 59.2 106.2M62.4 105.4Q61.6 106.6 60.8 106.2" fill="none" stroke="#8c4b58" stroke-width="1" stroke-linecap="round"/>
-              </g>
+              <circle cx="60" cy="97" r="2.6" fill="#9aa6b2"/>
             </g>
           </svg>
         </div>
